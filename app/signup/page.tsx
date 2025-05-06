@@ -11,26 +11,39 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { supabase } from "@/lib/supautil"
 import { toast } from "sonner"
 
-export default function LoginPage() {
+export default function SignUpPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      // Sign up with Supabase
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
       })
 
       if (error) throw error
 
-      toast.success('Successfully logged in!')
-      router.push('/dashboard')
+      // Create user in Prisma
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email,
+          name: email.split('@')[0] // Extract name from email
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to create user')
+
+      toast.success('Account created! Please check your email for verification.')
+      router.push('/login')
     } catch (error: any) {
       toast.error(error.message)
     } finally {
@@ -48,29 +61,24 @@ export default function LoginPage() {
             </div>
             <span className="text-xl font-bold">MoneyMap</span>
           </div>
-          <CardTitle className="text-2xl">Welcome back</CardTitle>
-          <CardDescription>Enter your email and password to access your account</CardDescription>
+          <CardTitle className="text-2xl">Create an account</CardTitle>
+          <CardDescription>Enter your email and create a password to get started</CardDescription>
         </CardHeader>
-        <form onSubmit={handleLogin}>
+        <form onSubmit={handleSignUp}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input 
                 id="email" 
                 type="email" 
-                placeholder="name@example.com"
+                placeholder="name@example.com" 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Link href="/forgot-password" className="text-sm text-blue-500 hover:text-blue-600">
-                  Forgot password?
-                </Link>
-              </div>
+              <Label htmlFor="password">Password</Label>
               <Input 
                 id="password" 
                 type="password"
@@ -82,12 +90,12 @@ export default function LoginPage() {
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Logging in...' : 'Log in'}
+              {loading ? 'Creating account...' : 'Sign up'}
             </Button>
             <div className="text-center text-sm">
-              Don&apos;t have an account?{" "}
-              <Link href="/signup" className="font-medium text-blue-500 hover:text-blue-600">
-                Sign up
+              Already have an account?{" "}
+              <Link href="/login" className="font-medium text-blue-500 hover:text-blue-600">
+                Log in
               </Link>
             </div>
           </CardFooter>
