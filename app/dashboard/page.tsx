@@ -1,3 +1,10 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supautil'
+import { BankStatement } from '@/types/statement'
+
 import { AlertTriangle, ArrowUpRight, CreditCard, DollarSign, FileText, MoreHorizontal, Plus } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -11,6 +18,146 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import Link from "next/link"
 
 export default function DashboardPage() {
+  const [statement, setStatement] = useState<BankStatement | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const router = useRouter()
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        router.push('/login')
+      }
+    }
+
+    checkAuth()
+  }, [router])
+
+  const formatCurrency = (amount: number) => {
+    return `P${amount.toFixed(2)}`
+  }
+
+  const calculateChange = (current: number, previous: number) => {
+    return ((current - previous) / previous) * 100
+  }
+
+  const getTransactionsByCategory = (transactions: any[]) => {
+    return transactions.reduce((acc, transaction) => {
+      // Extract category from transaction description
+      let category = 'Other'
+      if (transaction.description.toLowerCase().includes('food') || 
+          transaction.description.toLowerCase().includes('spar') || 
+          transaction.description.toLowerCase().includes('checkers')) {
+        category = 'Food'
+      } else if (transaction.description.toLowerCase().includes('electricity')) {
+        category = 'Utilities'
+      } else if (transaction.description.toLowerCase().includes('virgin')) {
+        category = 'Health & Fitness'
+      } else if (transaction.description.toLowerCase().includes('airtime')) {
+        category = 'Communication'
+      }
+
+      if (!acc[category]) {
+        acc[category] = 0
+      }
+      acc[category] += Math.abs(parseFloat(transaction.amount))
+      return acc
+    }, {})
+  }
+
+  useEffect(() => {
+    const fetchStatement = async () => {
+      try {
+        setIsLoading(true)
+        setError(null)
+
+        // First check if user is authenticated
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) {
+          router.push('/login')
+          return
+        }
+
+        // Get the user's latest statement
+        const { data: statements, error: statementsError } = await supabase
+          .from('statements')
+          .select('*')
+          .eq('user_id', session.user.id) // Filter by user_id
+          .order('created_at', { ascending: false })
+          .limit(1)
+
+        console.log('Fetched statements:', statements) // For debugging
+
+        if (statementsError) {
+          console.error('Database error:', statementsError)
+          throw new Error('Failed to fetch statement data')
+        }
+
+        if (!statements || statements.length === 0) {
+          setStatement(null)
+          return
+        }
+
+        setStatement(statements[0])
+      } catch (err: any) {
+        console.error('Error details:', err)
+        setError(err.message || 'An error occurred while fetching your statement')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchStatement()
+  }, [router]) // Add router to dependency array
+
+  if (isLoading) {
+    return <div className="container mx-auto p-6">Loading...</div>
+  }
+
+  if (error || !statement) {
+    return (
+      <div className="container mx-auto p-6">
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            {error || 'No statement data available. Please upload your bank statement.'}
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  // Calculate metrics from statement data
+  const totalBalance = statement.closingBalance
+  const previousBalance = statement.openingBalance
+  const balanceChange = calculateChange(totalBalance, previousBalance)
+
+  const transactions = statement.transactions || []
+  const debitTransactions = transactions.filter(t => t.type === 'debit')
+  const monthlySpending = debitTransactions.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0)
+  
+  const categorySpending = getTransactionsByCategory(debitTransactions)
+  const monthlyBudget = 2500 // You might want to make this configurable
+  const spentPercentage = (monthlySpending / monthlyBudget) * 100
+
+  // Get recent transactions
+  const recentTransactions = transactions
+    .slice(0, 5)
+    .map(transaction => ({
+      name: transaction.description,
+      category: transaction.description.includes('Food') ? 'Food' : 'Other',
+      amount: transaction.type === 'credit' ? 
+        `+${formatCurrency(parseFloat(transaction.amount))}` : 
+        `-${formatCurrency(parseFloat(transaction.amount))}`,
+      date: new Date(transaction.date).toLocaleDateString(),
+      icon: transaction.description.substring(0, 2).toUpperCase(),
+      iconColor: transaction.type === 'credit' ? 'bg-green-500' : 'bg-blue-500',
+      flag: false // Add flag property with a default value
+    }))
+
   return (
     <div className="container mx-auto p-6">
       <div className="mb-8 flex items-center justify-between">
@@ -37,10 +184,10 @@ export default function DashboardPage() {
             <DollarSign className="h-4 w-4 text-gray-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">P4,563.00</div>
-            <div className="flex items-center text-sm text-green-500">
+            <div className="text-2xl font-bold">{formatCurrency(totalBalance)}</div>
+            <div className={`flex items-center text-sm ${balanceChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
               <ArrowUpRight className="mr-1 h-4 w-4" />
-              <span>+2.5%</span>
+              <span>{balanceChange.toFixed(1)}%</span>
               <span className="ml-1 text-gray-500">from last month</span>
             </div>
           </CardContent>
@@ -51,27 +198,22 @@ export default function DashboardPage() {
             <CreditCard className="h-4 w-4 text-gray-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">P1,842.00</div>
-            <div className="flex items-center text-sm text-red-500">
-              <ArrowUpRight className="mr-1 h-4 w-4" />
-              <span>+12.3%</span>
-              <span className="ml-1 text-gray-500">from last month</span>
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(monthlySpending)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-gray-500">Monthly Budget</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertTriangle className={`h-4 w-4 ${spentPercentage > 75 ? 'text-amber-500' : 'text-green-500'}`} />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">P2,500.00</div>
+            <div className="text-2xl font-bold">{formatCurrency(monthlyBudget)}</div>
             <div className="mt-2">
               <div className="mb-1 flex items-center justify-between text-xs">
-                <span>P1,842 spent</span>
-                <span>73.7%</span>
+                <span>{formatCurrency(monthlySpending)} spent</span>
+                <span>{spentPercentage.toFixed(1)}%</span>
               </div>
-              <Progress value={73.7} className="h-2" />
+              <Progress value={spentPercentage} className="h-2" />
             </div>
           </CardContent>
         </Card>
@@ -169,49 +311,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {[
-                {
-                  name: "Vida e Caffè",
-                  category: "Food",
-                  amount: "-P42.50",
-                  date: "Today, 9:15 AM",
-                  icon: "VC",
-                  iconColor: "bg-green-500",
-                },
-                {
-                  name: "Game City Mall",
-                  category: "Shopping",
-                  amount: "-P184.29",
-                  date: "Yesterday, 2:34 PM",
-                  icon: "GC",
-                  iconColor: "bg-orange-500",
-                },
-                {
-                  name: "inDrive Ride",
-                  category: "Transport",
-                  amount: "-P54.75",
-                  date: "Apr 12, 8:12 PM",
-                  icon: "ID",
-                  iconColor: "bg-black",
-                },
-                {
-                  name: "Student Allowance",
-                  category: "Income",
-                  amount: "+P1,450.00",
-                  date: "Apr 10, 12:00 AM",
-                  icon: "SA",
-                  iconColor: "bg-blue-500",
-                },
-                {
-                  name: "Showmax Subscription",
-                  category: "Entertainment",
-                  amount: "-P95.99",
-                  date: "Apr 9, 3:45 AM",
-                  icon: "SM",
-                  iconColor: "bg-red-500",
-                  flag: true,
-                },
-              ].map((transaction, i) => (
+              {recentTransactions.map((transaction, i) => (
                 <div key={i} className="flex items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">

@@ -22,17 +22,35 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
+      // Log attempt
+      console.log('Attempting login with email:', email)
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.toLowerCase().trim(),
         password,
       })
 
-      if (error) throw error
+      if (error) {
+        console.error('Login error details:', error)
+        throw error
+      }
 
-      toast.success('Successfully logged in!')
-      router.push('/dashboard')
+      if (data.user) {
+        console.log('Login successful:', data.user.email)
+        
+        // Store the session
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session) {
+          localStorage.setItem('session', JSON.stringify(session))
+          toast.success('Successfully logged in!')
+          router.push('/dashboard')
+        } else {
+          throw new Error('No session created after login')
+        }
+      }
     } catch (error: any) {
-      toast.error(error.message)
+      console.error('Full login error:', error)
+      toast.error(error.message || 'Invalid credentials')
     } finally {
       setLoading(false)
     }

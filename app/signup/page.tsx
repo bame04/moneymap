@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { supabase } from "@/lib/supautil"
 import { toast } from "sonner"
 
 export default function SignUpPage() {
@@ -22,30 +21,26 @@ export default function SignUpPage() {
     setLoading(true)
 
     try {
-      // Sign up with Supabase
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-      })
-
-      if (error) throw error
-
-      // Create user in Prisma
       const response = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           email,
-          name: email.split('@')[0] // Extract name from email
+          password,
         }),
       })
 
-      if (!response.ok) throw new Error('Failed to create user')
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create account')
+      }
 
       toast.success('Account created! Please check your email for verification.')
       router.push('/login')
     } catch (error: any) {
       toast.error(error.message)
+      console.error('Signup error:', error)
     } finally {
       setLoading(false)
     }

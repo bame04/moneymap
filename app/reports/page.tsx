@@ -1,6 +1,11 @@
-import { AlertTriangle, Calendar, ChevronLeft, ChevronRight, Download, Filter } from "lucide-react"
+'use client'
+
+import { useState, useEffect } from "react"
+import { AlertTriangle, Calendar, ChevronLeft, ChevronRight, Download, Filter, UploadIcon } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import Link from "next/link"
+import { supabase } from "@/lib/supautil"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MonthlySpendingChart } from "@/components/monthly-spending-chart"
@@ -8,21 +13,60 @@ import { CategoryComparisonChart } from "@/components/category-comparison-chart"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export default function ReportsPage() {
+  const [hasData, setHasData] = useState(false)
+
+  useEffect(() => {
+    const checkForStatements = async () => {
+      // Here you would check your database for uploaded statements
+      const { data: statements } = await supabase
+        .from('statements')
+        .select('id')
+        .limit(1)
+      
+      setHasData((statements ?? []).length > 0)
+    }
+
+    checkForStatements()
+  }, [])
+
+  if (!hasData) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="flex flex-col items-center justify-center p-12 text-center">
+          <CardHeader>
+            <CardTitle className="text-2xl font-semibold text-gray-900">No Financial Data Available</CardTitle>
+            <CardDescription className="mt-2 text-base text-gray-600">
+              Upload your bank statements to access detailed financial analytics and insights.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/upload">
+              <Button className="mt-4 font-medium">
+                <UploadIcon className="mr-2 h-4 w-4" />
+                Import Bank Statement
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto p-6">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-blue-950">Monthly Reports</h1>
-          <p className="text-gray-500">Analyze your spending patterns and track your financial progress</p>
+          <h1 className="text-3xl font-semibold text-gray-900">Financial Analytics</h1>
+          <p className="text-base text-gray-600">Comprehensive analysis of your financial activities</p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" className="font-medium">
             <Download className="mr-2 h-4 w-4" />
-            Export
+            Export Report
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" className="font-medium">
             <Filter className="mr-2 h-4 w-4" />
-            Filter
+            Apply Filters
           </Button>
         </div>
       </div>
@@ -43,13 +87,13 @@ export default function ReportsPage() {
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Total Spending</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">Total Expenditure</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">P3,842.00</div>
-            <div className="flex items-center text-sm text-red-500">
-              <span>+12.3%</span>
-              <span className="ml-1 text-gray-500">vs last month</span>
+            <div className="text-2xl font-semibold text-gray-900">P3,842.00</div>
+            <div className="flex items-center text-sm">
+              <span className="text-red-600">+12.3%</span>
+              <span className="ml-1 text-gray-600">compared to previous month</span>
             </div>
           </CardContent>
         </Card>
@@ -82,8 +126,10 @@ export default function ReportsPage() {
       <div className="mt-6">
         <Card>
           <CardHeader>
-            <CardTitle>Monthly Spending Trend</CardTitle>
-            <CardDescription>Your spending patterns over the past 6 months</CardDescription>
+            <CardTitle className="text-xl font-semibold text-gray-900">Expenditure Analysis</CardTitle>
+            <CardDescription className="text-base text-gray-600">
+              Six-month historical spending patterns
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[350px]">
@@ -128,18 +174,18 @@ export default function ReportsPage() {
             <div className="space-y-4">
               <div className="rounded-lg border border-red-100 bg-red-50 p-4">
                 <div className="mb-2 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-red-500" />
-                  <h3 className="font-medium text-red-700">Food Expenses</h3>
+                  <AlertTriangle className="h-5 w-5 text-red-600" />
+                  <h3 className="font-semibold text-gray-900">Expenditure Alert</h3>
                   <Badge variant="destructive" className="ml-auto">
-                    High Risk
+                    High Priority
                   </Badge>
                 </div>
                 <p className="text-sm text-gray-700">
                   Your food expenses (P645) are 45% higher than your monthly average (P458). This is the highest monthly
                   food spend in the past 12 months.
                 </p>
-                <Button variant="link" className="mt-2 h-auto p-0 text-sm text-red-700">
-                  View Details
+                <Button variant="link" className="mt-2 h-auto p-0 text-sm font-medium text-red-700">
+                  Review Details
                 </Button>
               </div>
 
@@ -189,11 +235,11 @@ export default function ReportsPage() {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="all">
-              <TabsList>
-                <TabsTrigger value="all">All Categories</TabsTrigger>
-                <TabsTrigger value="essentials">Essentials</TabsTrigger>
-                <TabsTrigger value="discretionary">Discretionary</TabsTrigger>
-                <TabsTrigger value="savings">Savings & Investments</TabsTrigger>
+              <TabsList className="font-medium">
+                <TabsTrigger value="all">Complete Overview</TabsTrigger>
+                <TabsTrigger value="essentials">Essential Expenses</TabsTrigger>
+                <TabsTrigger value="discretionary">Discretionary Spending</TabsTrigger>
+                <TabsTrigger value="savings">Investment & Savings</TabsTrigger>
               </TabsList>
               <TabsContent value="all" className="mt-4">
                 <div className="rounded-lg border">
