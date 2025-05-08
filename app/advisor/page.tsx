@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { createFinancialAdvice } from "@/lib/openai"
+//import { createFinancialAdvice } from "@/lib/openai"
 import { supabase } from "@/lib/supautil"
 
 interface Message {
@@ -56,8 +56,8 @@ export default function AdvisorPage() {
     setLoading(true)
 
     try {
-      const response = await createFinancialAdvice(userMessage, statementData)
-      setMessages(prev => [...prev, { role: 'assistant', content: response || 'Sorry, I could not process your request.' }])
+      
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I could not process your request.' }])
     } catch (error) {
       console.error('Error:', error)
       setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, there was an error processing your request.' }])
