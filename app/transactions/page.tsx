@@ -130,7 +130,7 @@ export default function TransactionsPage() {
                     iconColor: "bg-green-600",
                   },
                   {
-                    name: "UB Gym Membership",
+                    name: "Gym Membership",
                     category: "Health & Fitness",
                     amount: "-P75.00",
                     date: "Apr 5, 12:00 AM",
@@ -374,7 +374,7 @@ export default function TransactionsPage() {
                     flagReason: "Unrecognized merchant",
                   },
                   {
-                    name: "UB Gym Membership",
+                    name: "Gym Membership",
                     category: "Health & Fitness",
                     amount: "-P75.00",
                     date: "Apr 5, 12:00 AM",
