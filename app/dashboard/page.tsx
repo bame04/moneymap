@@ -21,22 +21,44 @@ export default function DashboardPage() {
   const [statement, setStatement] = useState<BankStatement | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [userName, setUserName] = useState<string | null>(null) // Add state for user name
   const router = useRouter()
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session) {
-        router.push('/login')
+    const checkAuthAndFetchUser = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) {
+          router.push('/login')
+          return
+        }
+
+        // Fetch user profile
+        const { data: userProfile, error: profileError } = await supabase
+          .from('profiles') // Replace with your actual table name for user profiles
+          .select('name, email') // Adjust fields based on your schema
+          .eq('id', session.user.id)
+          .single()
+
+        if (profileError) {
+          console.error('Error fetching user profile:', profileError)
+          const emailPrefix = session.user.email?.split('@')[0] // Extract name before @
+          setUserName(emailPrefix ?? 'User') // Fallback to 'User' if email is not available
+        } else {
+          setUserName(userProfile.name || session.user.email?.split('@')[0]) // Use name or fallback to email prefix
+        }
+      } catch (err) {
+        console.error('Error during authentication or fetching user:', err)
+        setUserName('User') // Fallback to a generic name
       }
     }
 
-    checkAuth()
+    checkAuthAndFetchUser()
   }, [router])
 
-  const formatCurrency = (amount: number) => {
-    return `P${amount.toFixed(2)}`
+  const formatCurrency = (amount: number | null | undefined) => {
+    if (amount == null) return "P0.00"; // Handle null or undefined values
+    return `P${amount.toFixed(2)}`;
   }
 
   const calculateChange = (current: number, previous: number) => {
@@ -131,13 +153,13 @@ export default function DashboardPage() {
   }
 
   // Calculate metrics from statement data
-  const totalBalance = statement.closingBalance
-  const previousBalance = statement.openingBalance
-  const balanceChange = calculateChange(totalBalance, previousBalance)
+  const totalBalance = statement?.closingBalance ?? 0; // Default to 0 if undefined
+  const previousBalance = statement?.openingBalance ?? 0; // Default to 0 if undefined
+  const balanceChange = calculateChange(totalBalance, previousBalance);
 
-  const transactions = statement.transactions || []
-  const debitTransactions = transactions.filter(t => t.type === 'debit')
-  const monthlySpending = debitTransactions.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0)
+  const transactions = statement?.transactions || [];
+  const debitTransactions = transactions.filter(t => t.type === 'debit');
+  const monthlySpending = debitTransactions.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount || "0")), 0);
   
   const categorySpending = getTransactionsByCategory(debitTransactions)
   const monthlyBudget = 2500 // You might want to make this configurable
@@ -162,7 +184,7 @@ export default function DashboardPage() {
     <div className="container mx-auto p-6">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-blue-950">Good morning, Bame!</h1>
+          <h1 className="text-3xl font-bold text-blue-950">Good morning, {userName}!</h1>
           <p className="text-gray-500">Here's what's happening with your finances today.</p>
         </div>
         <div className="flex gap-3">

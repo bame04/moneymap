@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Home, BarChart3, Upload, MessageSquare, Settings, LogOut, CreditCard } from "lucide-react"
@@ -8,10 +8,32 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { supabase } from "@/lib/supautil"
 
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | null>(null) // State for user email
+
+  useEffect(() => {
+    const fetchUserEmail = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        if (error) {
+          console.error("Error fetching session:", error)
+          return
+        }
+
+        if (session?.user) {
+          setUserEmail(session.user.email ?? null) // Set the user's email with null fallback
+        }
+      } catch (err) {
+        console.error("Error fetching user email:", err)
+      }
+    }
+
+    fetchUserEmail()
+  }, [])
 
   const routes = [
     {
@@ -100,12 +122,14 @@ export function Sidebar() {
         <div className="flex items-center gap-3">
           <Avatar className="h-9 w-9">
             <AvatarImage src="/placeholder.svg?height=36&width=36" />
-            <AvatarFallback className="bg-blue-500">BM</AvatarFallback>
+            <AvatarFallback className="bg-blue-500">
+              {userEmail ? userEmail[0].toUpperCase() : "U"}
+            </AvatarFallback>
           </Avatar>
           {!collapsed && (
             <div className="flex flex-1 flex-col overflow-hidden">
-              <span className="text-sm font-medium">Bame Monageng</span>
-              <span className="truncate text-xs text-gray-300 dark:text-gray-400">bame.monageng@biust.ac.bw</span>
+              <span className="text-sm font-medium">{userEmail?.split("@")[0] || "User"}</span>
+              <span className="truncate text-xs text-gray-300 dark:text-gray-400">{userEmail || "No email"}</span>
             </div>
           )}
         </div>
