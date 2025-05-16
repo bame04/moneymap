@@ -1,363 +1,414 @@
 'use client'
 
 import { useState, useEffect } from "react"
+import { supabase } from "@/lib/supautil"
+import { BankStatement, Transaction } from "@/types/statement"
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { AlertTriangle, Calendar, ChevronLeft, ChevronRight, Download, Filter, UploadIcon } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { supabase } from "@/lib/supautil"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MonthlySpendingChart } from "@/components/monthly-spending-chart"
 import { CategoryComparisonChart } from "@/components/category-comparison-chart"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+
+// Helper functions
+const parseTransactions = (statement: BankStatement): Transaction[] => {
+  try {
+    return typeof statement.transactions === 'string' 
+      ? JSON.parse(statement.transactions) 
+      : statement.transactions || []
+  } catch (e) {
+    console.error('Error parsing transactions:', e)
+    return []
+  }
+}
+
+const getAnomalies = (categoryTotals: CategoryTotal[]): Array<{
+  category: string;
+  currentAmount: number;
+  averageAmount: number;
+  percentage: number;
+  priority: 'high' | 'medium' | 'positive';
+}> => {
+  return categoryTotals
+    .map(cat => {
+      const percentage = ((cat.currentAmount - cat.previousAmount) / cat.previousAmount) * 100;
+      let priority: 'high' | 'medium' | 'positive';
+      
+      if (percentage > 30) priority = 'high';
+      else if (percentage > 15) priority = 'medium';
+      else if (percentage < -10) priority = 'positive';
+      else return null;
+
+      return {
+        category: cat.category,
+        currentAmount: cat.currentAmount,
+        averageAmount: cat.previousAmount,
+        percentage,
+        priority
+      };
+    })
+    .filter((item): item is { 
+      category: string;
+      currentAmount: number;
+      averageAmount: number;
+      percentage: number;
+      priority: 'high' | 'medium' | 'positive';
+    } => item !== null);
+};
+
+interface CategoryTotal {
+  category: string
+  currentAmount: number
+  previousAmount: number
+  percentage: number
+  change: number
+}
+
+// Define specific categories that match your transactions
+const CATEGORIES = {
+  FOOD: ['spar', 'pick n pay', 'pnp', 'checkers', 'shoprite'],
+  ENTERTAINMENT: ['movies', 'spotify', 'netflix', 'game'],
+  TRANSFERS: ['transfer to', 'payment to', 'send money'],
+  SHOPPING: ['pos purchase'],
+  COMMUNICATION: ['fnb app prepaid', 'airtime', 'data'],
+  UTILITIES: ['electricity', 'water', 'municipal'],
+  DINING: ['braai', 'restaurant', 'kfc', 'nandos']
+} as const
+
+// Improved categorization helper
+const categorize = (description: string): string => {
+  const d = description.toLowerCase()
+  
+  for (const [category, keywords] of Object.entries(CATEGORIES)) {
+    if (keywords.some(keyword => d.includes(keyword))) {
+      return category
+    }
+  }
+  return 'OTHER'
+}
+
+// Add spending summary interface
+interface SpendingSummary {
+  category: string
+  total: number
+  count: number
+  transactions: Transaction[]
+  averagePerTransaction: number
+}
 
 export default function ReportsPage() {
-  const [hasData, setHasData] = useState(false)
+  const [statements, setStatements] = useState<BankStatement[]>([])
+  const [spendingSummaries, setSpendingSummaries] = useState<SpendingSummary[]>([])
+  const [loading, setLoading] = useState(true)
+  const [currentMonth, setCurrentMonth] = useState(new Date())
+  const [categoryTotals, setCategoryTotals] = useState<CategoryTotal[]>([])
+  const [monthlyTotal, setMonthlyTotal] = useState(0)
+  const [averageDaily, setAverageDaily] = useState(0)
+  const [topCategory, setTopCategory] = useState({ name: '', amount: 0, percentage: 0 })
 
   useEffect(() => {
-    const checkForStatements = async () => {
-      // Here you would check your database for uploaded statements
-      const { data: statements } = await supabase
+    const fetchData = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        window.location.href = '/login'
+        return
+      }
+
+      const { data, error } = await supabase
         .from('statements')
-        .select('id')
-        .limit(1)
-      
-      setHasData((statements ?? []).length > 0)
+        .select('*')
+        .eq('user_id', session.user.id)
+
+      if (error) {
+        console.error('Error:', error)
+        return
+      }
+
+      setStatements(data || [])
+      processData(data || [])
+      setLoading(false)
     }
 
-    checkForStatements()
+    fetchData()
+  }, [currentMonth])
+
+  const processData = (statements: BankStatement[]) => {
+    const allTransactions = statements.flatMap(s => parseTransactions(s))
+    const currentMonthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)
+    const currentMonthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0)
+    const previousMonthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1)
+    const previousMonthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 0)
+
+    // Current month transactions
+    const currentMonthTx = allTransactions.filter(tx => {
+      const txDate = new Date(tx.date)
+      return txDate >= currentMonthStart && txDate <= currentMonthEnd
+    })
+
+    // Previous month transactions
+    const previousMonthTx = allTransactions.filter(tx => {
+      const txDate = new Date(tx.date)
+      return txDate >= previousMonthStart && txDate <= previousMonthEnd
+    })
+
+    // Calculate category totals
+    const categories = new Map<string, { current: number; previous: number }>()
+    
+    currentMonthTx.forEach(tx => {
+      const category = categorize(tx.description)
+      const amount = Math.abs(Number(tx.amount))
+      const current = categories.get(category)?.current || 0
+      categories.set(category, { 
+        current: current + amount,
+        previous: categories.get(category)?.previous || 0 
+      })
+    })
+
+    previousMonthTx.forEach(tx => {
+      const category = categorize(tx.description)
+      const amount = Math.abs(Number(tx.amount))
+      const previous = categories.get(category)?.previous || 0
+      categories.set(category, { 
+        current: categories.get(category)?.current || 0,
+        previous: previous + amount 
+      })
+    })
+
+    // Calculate totals and percentages
+    const monthTotal = currentMonthTx.reduce((sum, tx) => 
+      sum + Math.abs(Number(tx.amount)), 0)
+    
+    const categoryData = Array.from(categories.entries()).map(([category, amounts]) => ({
+      category,
+      currentAmount: amounts.current,
+      previousAmount: amounts.previous,
+      percentage: (amounts.current / monthTotal) * 100,
+      change: ((amounts.current - amounts.previous) / amounts.previous) * 100
+    })).sort((a, b) => b.currentAmount - a.currentAmount)
+
+    // Set state
+    setCategoryTotals(categoryData)
+    setMonthlyTotal(monthTotal)
+    setAverageDaily(monthTotal / currentMonthEnd.getDate())
+    setTopCategory({
+      name: categoryData[0]?.category || '',
+      amount: categoryData[0]?.currentAmount || 0,
+      percentage: categoryData[0]?.percentage || 0
+    })
+  }
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        window.location.href = '/login'
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('statements')
+        .select('*')
+        .eq('user_id', session.user.id)
+
+      if (error) {
+        console.error('Error:', error)
+        return
+      }
+
+      setStatements(data || [])
+      processTransactions(data || [])
+      setLoading(false)
+    }
+
+    fetchData()
   }, [])
 
-  if (!hasData) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card className="flex flex-col items-center justify-center p-12 text-center">
-          <CardHeader>
-            <CardTitle className="text-2xl font-semibold text-gray-900">No Financial Data Available</CardTitle>
-            <CardDescription className="mt-2 text-base text-gray-600">
-              Upload your bank statements to access detailed financial analytics and insights.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link href="/upload">
-              <Button className="mt-4 font-medium">
-                <UploadIcon className="mr-2 h-4 w-4" />
-                Import Bank Statement
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    )
+  const processTransactions = (statements: BankStatement[]) => {
+    const allTransactions = statements.flatMap(s => {
+      const txs = parseTransactions(s)
+      return txs.map(tx => ({
+        ...tx,
+        amount: tx.amount,
+        category: categorize(tx.description)
+      }))
+    })
+
+    // Group by category
+    const summaries = Object.keys(CATEGORIES).reduce((acc, category) => {
+      const categoryTxs = allTransactions.filter(tx => tx.category === category)
+      const total = categoryTxs.reduce((sum, tx) => sum + Math.abs(Number(tx.amount)), 0)
+      
+      acc[category] = {
+        category,
+        total,
+        count: categoryTxs.length,
+        transactions: categoryTxs,
+        averagePerTransaction: total / (categoryTxs.length || 1)
+      }
+      return acc
+    }, {} as Record<string, SpendingSummary>)
+
+    setSpendingSummaries(Object.values(summaries).sort((a, b) => b.total - a.total))
+  }
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold text-gray-900">Financial Analytics</h1>
-          <p className="text-base text-gray-600">Comprehensive analysis of your financial activities</p>
-        </div>
-        <div className="flex gap-3">
-          <Button variant="outline" size="sm" className="font-medium">
-            <Download className="mr-2 h-4 w-4" />
-            Export Report
-          </Button>
-          <Button variant="outline" size="sm" className="font-medium">
-            <Filter className="mr-2 h-4 w-4" />
-            Apply Filters
-          </Button>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header Section */}
+      <div className="bg-white border-b">
+        <div className="container mx-auto px-6 py-8">
+          <h1 className="text-3xl font-bold text-gray-900">Financial Reports</h1>
+          <div className="mt-2 flex items-center gap-2 text-gray-600">
+            <Calendar className="h-4 w-4" />
+            <span>Last updated: {new Date().toLocaleDateString()}</span>
+          </div>
         </div>
       </div>
 
-      <div className="mb-6 flex items-center justify-between rounded-lg border bg-white p-4">
-        <Button variant="ghost" size="icon">
-          <ChevronLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex items-center gap-2">
-          <Calendar className="h-5 w-5 text-blue-500" />
-          <span className="text-lg font-medium">April 2025</span>
-        </div>
-        <Button variant="ghost" size="icon">
-          <ChevronRight className="h-5 w-5" />
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Total Expenditure</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold text-gray-900">P3,842.00</div>
-            <div className="flex items-center text-sm">
-              <span className="text-red-600">+12.3%</span>
-              <span className="ml-1 text-gray-600">compared to previous month</span>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Average Daily Spend</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">P128.07</div>
-            <div className="flex items-center text-sm text-red-500">
-              <span>+8.5%</span>
-              <span className="ml-1 text-gray-500">vs last month</span>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Top Category</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">Food</div>
-            <div className="flex items-center text-sm text-red-500">
-              <span>P645.00</span>
-              <span className="ml-1 text-gray-500">(35.0% of total)</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="mt-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold text-gray-900">Expenditure Analysis</CardTitle>
-            <CardDescription className="text-base text-gray-600">
-              Six-month historical spending patterns
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[350px]">
-              <MonthlySpendingChart />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Category Comparison</CardTitle>
-              <CardDescription>Current month vs previous month</CardDescription>
-            </div>
-            <Select defaultValue="all">
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select view" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="top5">Top 5 Categories</SelectItem>
-                <SelectItem value="increasing">Increasing Only</SelectItem>
-                <SelectItem value="decreasing">Decreasing Only</SelectItem>
-              </SelectContent>
-            </Select>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[350px]">
-              <CategoryComparisonChart />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Spending Anomalies</CardTitle>
-            <CardDescription>Unusual spending patterns detected</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="rounded-lg border border-red-100 bg-red-50 p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-red-600" />
-                  <h3 className="font-semibold text-gray-900">Expenditure Alert</h3>
-                  <Badge variant="destructive" className="ml-auto">
-                    High Priority
-                  </Badge>
-                </div>
-                <p className="text-sm text-gray-700">
-                  Your food expenses (P645) are 45% higher than your monthly average (P458). This is the highest monthly
-                  food spend in the past 12 months.
+      <div className="container mx-auto px-6 py-8">
+        {/* Total Overview Card */}
+        <Card className="mb-8 bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
+          <CardContent className="pt-6">
+            <div className="grid gap-6 md:grid-cols-3">
+              <div className="rounded-lg bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-sm font-medium text-white">Total Spending</p>
+                <p className="mt-2 text-3xl font-bold text-white">
+                  P{spendingSummaries.reduce((acc, sum) => acc + sum.total, 0).toFixed(2)}
                 </p>
-                <Button variant="link" className="mt-2 h-auto p-0 text-sm font-medium text-red-700">
-                  Review Details
-                </Button>
               </div>
-
-              <div className="rounded-lg border border-amber-100 bg-amber-50 p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-amber-500" />
-                  <h3 className="font-medium text-amber-700">Entertainment Expenses</h3>
-                  <Badge variant="outline" className="ml-auto border-amber-200 text-amber-700">
-                    Medium Risk
-                  </Badge>
-                </div>
-                <p className="text-sm text-gray-700">
-                  Your entertainment expenses (P425) are 28% higher than your monthly average (P332). Consider reviewing
-                  your subscriptions.
+              <div className="rounded-lg bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-sm font-medium text-white">Total Transactions</p>
+                <p className="mt-2 text-3xl font-bold text-white">
+                  {spendingSummaries.reduce((acc, sum) => acc + sum.count, 0)}
                 </p>
-                <Button variant="link" className="mt-2 h-auto p-0 text-sm text-amber-700">
-                  View Details
-                </Button>
               </div>
-
-              <div className="rounded-lg border border-green-100 bg-green-50 p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-green-500" />
-                  <h3 className="font-medium text-green-700">Grocery Expenses</h3>
-                  <Badge variant="outline" className="ml-auto border-green-200 text-green-700">
-                    Positive
-                  </Badge>
-                </div>
-                <p className="text-sm text-gray-700">
-                  Your grocery expenses (P385) are 15% lower than your monthly average (P453). Great job on reducing
-                  this category!
+              <div className="rounded-lg bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-sm font-medium text-white">Categories</p>
+                <p className="mt-2 text-3xl font-bold text-white">
+                  {spendingSummaries.length}
                 </p>
-                <Button variant="link" className="mt-2 h-auto p-0 text-sm text-green-700">
-                  View Details
-                </Button>
               </div>
             </div>
           </CardContent>
         </Card>
-      </div>
 
-      <div className="mt-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Monthly Breakdown</CardTitle>
-            <CardDescription>Detailed spending by category</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="all">
-              <TabsList className="font-medium">
-                <TabsTrigger value="all">Complete Overview</TabsTrigger>
-                <TabsTrigger value="essentials">Essential Expenses</TabsTrigger>
-                <TabsTrigger value="discretionary">Discretionary Spending</TabsTrigger>
-                <TabsTrigger value="savings">Investment & Savings</TabsTrigger>
-              </TabsList>
-              <TabsContent value="all" className="mt-4">
-                <div className="rounded-lg border">
-                  <div className="grid grid-cols-12 border-b bg-gray-50 p-3 text-sm font-medium text-gray-500">
-                    <div className="col-span-4">Category</div>
-                    <div className="col-span-2 text-right">Amount</div>
-                    <div className="col-span-2 text-right">% of Total</div>
-                    <div className="col-span-2 text-right">vs Last Month</div>
-                    <div className="col-span-2 text-right">Trend</div>
+        {/* Category Cards Grid */}
+        <div className="mb-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {spendingSummaries.map((summary, index) => (
+            <Card key={summary.category} className="overflow-hidden">
+              <CardHeader className="border-b bg-gray-50 pb-4">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">{summary.category}</CardTitle>
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center
+                    ${index === 0 ? 'bg-red-100 text-red-600' :
+                      index === 1 ? 'bg-orange-100 text-orange-600' :
+                      'bg-blue-100 text-blue-600'}`}>
+                    {summary.count}
                   </div>
-                  {[
-                    {
-                      category: "Food",
-                      amount: "P645.00",
-                      percentage: "35.0%",
-                      change: "+45%",
-                      trend: "increasing",
-                      alert: true,
-                    },
-                    {
-                      category: "Shopping",
-                      amount: "P442.00",
-                      percentage: "21.9%",
-                      change: "+12%",
-                      trend: "increasing",
-                    },
-                    {
-                      category: "Transportation",
-                      amount: "P354.00",
-                      percentage: "17.0%",
-                      change: "-5%",
-                      trend: "decreasing",
-                    },
-                    {
-                      category: "Entertainment",
-                      amount: "P425.00",
-                      percentage: "11.1%",
-                      change: "+28%",
-                      trend: "increasing",
-                      alert: true,
-                    },
-                    {
-                      category: "Groceries",
-                      amount: "P385.00",
-                      percentage: "10.0%",
-                      change: "-15%",
-                      trend: "decreasing",
-                    },
-                    {
-                      category: "Utilities",
-                      amount: "P291.00",
-                      percentage: "7.6%",
-                      change: "+2%",
-                      trend: "stable",
-                    },
-                  ].map((item, i) => (
-                    <div key={i} className="grid grid-cols-12 border-b p-3 text-sm last:border-0">
-                      <div className="col-span-4 flex items-center gap-2">
-                        {item.alert && <AlertTriangle className="h-4 w-4 text-red-500" />}
-                        {item.category}
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-2xl font-bold text-gray-900">
+                      P{summary.total.toFixed(2)}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      ~P{summary.averagePerTransaction.toFixed(2)} / transaction
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    {((summary.total / spendingSummaries.reduce((acc, sum) => acc + sum.total, 0)) * 100).toFixed(1)}%
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* Charts Section */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Pie Chart */}
+          <Card className="md:col-span-1">
+            <CardHeader>
+              <CardTitle>Spending Distribution</CardTitle>
+              <CardDescription>Category breakdown</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[400px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={spendingSummaries}
+                    dataKey="total"
+                    nameKey="category"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={150}
+                    fill="#8884d8"
+                    label={({ name, percent }) => 
+                      `${name} ${(percent * 100).toFixed(0)}%`
+                    }
+                  >
+                    {spendingSummaries.map((_, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={[
+                          '#3b82f6', '#ef4444', '#f97316', 
+                          '#8b5cf6', '#ec4899', '#06b6d4',
+                          '#10b981'
+                        ][index % 7]} 
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => `P${Number(value).toFixed(2)}`} />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Transactions List */}
+          <Card className="md:col-span-1">
+            <CardHeader>
+              <CardTitle>Recent Transactions</CardTitle>
+              <CardDescription>Latest activity across categories</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {spendingSummaries.flatMap(s => s.transactions)
+                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                  .slice(0, 5)
+                  .map((tx, i) => (
+                    <div key={i} 
+                      className="flex items-center justify-between rounded-lg border p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center gap-4">
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center
+                          ${categorize(tx.description) === 'FOOD' ? 'bg-green-100 text-green-600' :
+                            categorize(tx.description) === 'ENTERTAINMENT' ? 'bg-purple-100 text-purple-600' :
+                            'bg-blue-100 text-blue-600'}`}>
+                          {categorize(tx.description).charAt(0)}
+                        </div>
+                        <div>
+                          <p className="font-medium">{tx.description}</p>
+                          <p className="text-sm text-gray-500">{tx.date}</p>
+                        </div>
                       </div>
-                      <div className="col-span-2 text-right font-medium">{item.amount}</div>
-                      <div className="col-span-2 text-right">{item.percentage}</div>
-                      <div
-                        className={`col-span-2 text-right ${
-                          item.trend === "increasing"
-                            ? "text-red-500"
-                            : item.trend === "decreasing"
-                              ? "text-green-500"
-                              : ""
-                        }`}
-                      >
-                        {item.change}
-                      </div>
-                      <div className="col-span-2 text-right">
-                        {item.trend === "increasing" ? (
-                          <span className="inline-block rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700">
-                            ↑ Increasing
-                          </span>
-                        ) : item.trend === "decreasing" ? (
-                          <span className="inline-block rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700">
-                            ↓ Decreasing
-                          </span>
-                        ) : (
-                          <span className="inline-block rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
-                            → Stable
-                          </span>
-                        )}
-                      </div>
+                      <p className="font-mono font-medium text-red-600">
+                        P{Math.abs(Number(tx.amount)).toFixed(2)}
+                      </p>
                     </div>
                   ))}
-                </div>
-              </TabsContent>
-              <TabsContent value="essentials" className="mt-4">
-                <div className="rounded-lg border">
-                  {/* Similar structure for essentials tab */}
-                  <div className="p-8 text-center text-gray-500">Essentials categories breakdown would appear here</div>
-                </div>
-              </TabsContent>
-              <TabsContent value="discretionary" className="mt-4">
-                <div className="rounded-lg border">
-                  {/* Similar structure for discretionary tab */}
-                  <div className="p-8 text-center text-gray-500">
-                    Discretionary spending breakdown would appear here
-                  </div>
-                </div>
-              </TabsContent>
-              <TabsContent value="savings" className="mt-4">
-                <div className="rounded-lg border">
-                  {/* Similar structure for savings tab */}
-                  <div className="p-8 text-center text-gray-500">
-                    Savings and investments breakdown would appear here
-                  </div>
-                </div>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

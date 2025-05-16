@@ -1,3 +1,8 @@
+'use client'
+
+import { useEffect, useState } from "react"
+import { supabase } from "@/lib/supautil"
+import { BankStatement, Transaction } from "@/types/statement"
 import { AlertTriangle, ArrowDownUp, Download, Filter, Search } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -7,7 +12,78 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
+// Helper functions
+const parseTransactions = (statement: BankStatement): Transaction[] => {
+  try {
+    return typeof statement.transactions === 'string' 
+      ? JSON.parse(statement.transactions) 
+      : statement.transactions || []
+  } catch (e) {
+    console.error('Error parsing transactions:', e)
+    return []
+  }
+}
+
+const normalizeTransaction = (tx: Transaction): Transaction => ({
+  ...tx,
+  type: tx.type === 'credit' ? 'debit' as const : 'credit' as const,
+  amount: tx.type === 'credit' ? `-${tx.amount}` : tx.amount
+})
+
+const getTransactionIcon = (description: string): { icon: string; color: string } => {
+  const d = description.toLowerCase()
+  if (d.includes('fnb') || d.includes('transfer')) return { icon: 'FN', color: 'bg-blue-500' }
+  if (d.includes('spar') || d.includes('choppies')) return { icon: 'GR', color: 'bg-green-500' }
+  if (d.includes('airtime')) return { icon: 'AT', color: 'bg-orange-500' }
+  if (d.includes('electricity')) return { icon: 'BP', color: 'bg-yellow-500' }
+  if (d.includes('braai')) return { icon: 'RS', color: 'bg-red-500' }
+  return { icon: 'TX', color: 'bg-gray-500' }
+}
+
 export default function TransactionsPage() {
+  const [statements, setStatements] = useState<BankStatement[]>([])
+  const [loading, setLoading] = useState(true)
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        window.location.href = '/login'
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('statements')
+        .select('*')
+        .eq('user_id', session.user.id)
+
+      if (error) {
+        console.error('Error fetching statements:', error)
+        return
+      }
+
+      setStatements(data || [])
+      const allTx = (data || []).flatMap(s => parseTransactions(s).map(normalizeTransaction))
+      setTransactions(allTx)
+      setLoading(false)
+    }
+
+    fetchTransactions()
+  }, [])
+
+  // Filter transactions by type
+  const incomeTransactions = transactions.filter(tx => !tx.amount.startsWith('-'))
+  const expenseTransactions = transactions.filter(tx => tx.amount.startsWith('-'))
+  
+  // Detect flagged transactions (unusual amounts)
+  const averageAmount = expenseTransactions.reduce((sum, tx) => 
+    sum + Math.abs(Number(tx.amount)), 0) / expenseTransactions.length
+  const flaggedTransactions = expenseTransactions.filter(tx => 
+    Math.abs(Number(tx.amount)) > averageAmount * 2)
+
+  if (loading) return <div className="flex justify-center items-center h-screen">Loading...</div>
+
   return (
     <div className="container mx-auto p-6">
       <div className="mb-8 flex items-center justify-between">
@@ -75,127 +151,34 @@ export default function TransactionsPage() {
           <Card>
             <CardHeader>
               <CardTitle>All Transactions</CardTitle>
-              <CardDescription>Showing 50 most recent transactions</CardDescription>
+              <CardDescription>Showing {transactions.length} transactions</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  {
-                    name: "Vida e Caffè",
-                    category: "Food",
-                    amount: "-P42.50",
-                    date: "Today, 9:15 AM",
-                    icon: "VC",
-                    iconColor: "bg-green-500",
-                  },
-                  {
-                    name: "Game City Mall",
-                    category: "Shopping",
-                    amount: "-P184.29",
-                    date: "Yesterday, 2:34 PM",
-                    icon: "GC",
-                    iconColor: "bg-orange-500",
-                  },
-                  {
-                    name: "inDrive Ride",
-                    category: "Transport",
-                    amount: "-P54.75",
-                    date: "Apr 12, 8:12 PM",
-                    icon: "ID",
-                    iconColor: "bg-black",
-                  },
-                  {
-                    name: "Student Allowance",
-                    category: "Income",
-                    amount: "+P1,450.00",
-                    date: "Apr 10, 12:00 AM",
-                    icon: "SA",
-                    iconColor: "bg-blue-500",
-                  },
-                  {
-                    name: "Showmax Subscription",
-                    category: "Entertainment",
-                    amount: "-P95.99",
-                    date: "Apr 9, 3:45 AM",
-                    icon: "SM",
-                    iconColor: "bg-red-500",
-                    flag: true,
-                  },
-                  {
-                    name: "Choppies Supermarket",
-                    category: "Groceries",
-                    amount: "-P178.35",
-                    date: "Apr 8, 5:30 PM",
-                    icon: "CS",
-                    iconColor: "bg-green-600",
-                  },
-                  {
-                    name: "Gym Membership",
-                    category: "Health & Fitness",
-                    amount: "-P75.00",
-                    date: "Apr 5, 12:00 AM",
-                    icon: "UG",
-                    iconColor: "bg-purple-500",
-                  },
-                  {
-                    name: "BPC Electricity",
-                    category: "Utilities",
-                    amount: "-P94.72",
-                    date: "Apr 3, 9:00 AM",
-                    icon: "BP",
-                    iconColor: "bg-yellow-500",
-                  },
-                  {
-                    name: "Textbook Purchase",
-                    category: "Education",
-                    amount: "-P356.83",
-                    date: "Apr 2, 3:22 PM",
-                    icon: "TB",
-                    iconColor: "bg-red-600",
-                  },
-                  {
-                    name: "Orange Money Transfer",
-                    category: "Transfer",
-                    amount: "+P175.00",
-                    date: "Apr 1, 7:45 PM",
-                    icon: "OM",
-                    iconColor: "bg-blue-400",
-                  },
-                ].map((transaction, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border p-3">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className={transaction.iconColor}>{transaction.icon}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{transaction.name}</span>
-                          {transaction.flag && (
-                            <Badge variant="destructive" className="h-5 px-1">
-                              <AlertTriangle className="mr-1 h-3 w-3" />
-                              Recurring
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {transaction.category} • {transaction.date}
+                {transactions.map((tx, i) => {
+                  const { icon, color } = getTransactionIcon(tx.description)
+                  const isIncome = !tx.amount.startsWith('-')
+                  return (
+                    <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-10 w-10">
+                          <AvatarFallback className={color}>{icon}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{tx.description}</span>
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {tx.date}
+                          </div>
                         </div>
                       </div>
+                      <div className={isIncome ? "font-medium text-green-600" : "font-medium"}>
+                        P{Math.abs(Number(tx.amount)).toFixed(2)}
+                      </div>
                     </div>
-                    <div className={transaction.amount.startsWith("+") ? "font-medium text-green-600" : "font-medium"}>
-                      {transaction.amount}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 flex items-center justify-between">
-                <Button variant="outline" size="sm">
-                  Previous
-                </Button>
-                <div className="text-sm text-gray-500">Showing 1-10 of 156 transactions</div>
-                <Button variant="outline" size="sm">
-                  Next
-                </Button>
+                  )
+                })}
               </div>
             </CardContent>
           </Card>
@@ -205,61 +188,31 @@ export default function TransactionsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Income Transactions</CardTitle>
-              <CardDescription>Showing income transactions only</CardDescription>
+              <CardDescription>Showing {incomeTransactions.length} transactions</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  {
-                    name: "Student Allowance",
-                    category: "Income",
-                    amount: "+P1,450.00",
-                    date: "Apr 10, 12:00 AM",
-                    icon: "SA",
-                    iconColor: "bg-blue-500",
-                  },
-                  {
-                    name: "Orange Money Transfer",
-                    category: "Transfer",
-                    amount: "+P175.00",
-                    date: "Apr 1, 7:45 PM",
-                    icon: "OM",
-                    iconColor: "bg-blue-400",
-                  },
-                  {
-                    name: "Tutoring Payment",
-                    category: "Income",
-                    amount: "+P350.00",
-                    date: "Mar 28, 2:15 PM",
-                    icon: "TP",
-                    iconColor: "bg-green-600",
-                  },
-                  {
-                    name: "Scholarship Disbursement",
-                    category: "Income",
-                    amount: "+P2,843.21",
-                    date: "Mar 15, 10:30 AM",
-                    icon: "SD",
-                    iconColor: "bg-blue-500",
-                  },
-                ].map((transaction, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border p-3">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className={transaction.iconColor}>{transaction.icon}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{transaction.name}</span>
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {transaction.category} • {transaction.date}
+                {incomeTransactions.map((tx, i) => {
+                  const { icon, color } = getTransactionIcon(tx.description)
+                  return (
+                    <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-10 w-10">
+                          <AvatarFallback className={color}>{icon}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{tx.description}</span>
+                          </div>
+                          <div className="text-sm text-gray-500">{tx.date}</div>
                         </div>
                       </div>
+                      <div className="font-medium text-green-600">
+                        P{Math.abs(Number(tx.amount)).toFixed(2)}
+                      </div>
                     </div>
-                    <div className="font-medium text-green-600">{transaction.amount}</div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </CardContent>
           </Card>
@@ -269,76 +222,33 @@ export default function TransactionsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Expense Transactions</CardTitle>
-              <CardDescription>Showing expense transactions only</CardDescription>
+              <CardDescription>Showing {expenseTransactions.length} transactions</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  {
-                    name: "Vida e Caffè",
-                    category: "Food",
-                    amount: "-P42.50",
-                    date: "Today, 9:15 AM",
-                    icon: "VC",
-                    iconColor: "bg-green-500",
-                  },
-                  {
-                    name: "Game City Mall",
-                    category: "Shopping",
-                    amount: "-P184.29",
-                    date: "Yesterday, 2:34 PM",
-                    icon: "GC",
-                    iconColor: "bg-orange-500",
-                  },
-                  {
-                    name: "inDrive Ride",
-                    category: "Transport",
-                    amount: "-P54.75",
-                    date: "Apr 12, 8:12 PM",
-                    icon: "ID",
-                    iconColor: "bg-black",
-                  },
-                  {
-                    name: "Showmax Subscription",
-                    category: "Entertainment",
-                    amount: "-P95.99",
-                    date: "Apr 9, 3:45 AM",
-                    icon: "SM",
-                    iconColor: "bg-red-500",
-                    flag: true,
-                  },
-                  {
-                    name: "Choppies Supermarket",
-                    category: "Groceries",
-                    amount: "-P178.35",
-                    date: "Apr 8, 5:30 PM",
-                    icon: "CS",
-                    iconColor: "bg-green-600",
-                  },
-                ].map((transaction, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border p-3">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className={transaction.iconColor}>{transaction.icon}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{transaction.name}</span>
-                          {transaction.flag && (
-                            <Badge variant="destructive" className="h-5 px-1">
-                              <AlertTriangle className="mr-1 h-3 w-3" />
-                              Recurring
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {transaction.category} • {transaction.date}
+                {expenseTransactions.map((tx, i) => {
+                  const { icon, color } = getTransactionIcon(tx.description)
+                  return (
+                    <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-10 w-10">
+                          <AvatarFallback className={color}>{icon}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{tx.description}</span>
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {tx.date}
+                          </div>
                         </div>
                       </div>
+                      <div className="font-medium">
+                        P{Math.abs(Number(tx.amount)).toFixed(2)}
+                      </div>
                     </div>
-                    <div className="font-medium">{transaction.amount}</div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </CardContent>
           </Card>
@@ -352,65 +262,39 @@ export default function TransactionsPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  {
-                    name: "Showmax Subscription",
-                    category: "Entertainment",
-                    amount: "-P95.99",
-                    date: "Apr 9, 3:45 AM",
-                    icon: "SM",
-                    iconColor: "bg-red-500",
-                    flag: true,
-                    flagReason: "Price increased from P85.99",
-                  },
-                  {
-                    name: "Unknown Charge",
-                    category: "Uncategorized",
-                    amount: "-P149.99",
-                    date: "Apr 7, 1:23 AM",
-                    icon: "UC",
-                    iconColor: "bg-gray-500",
-                    flag: true,
-                    flagReason: "Unrecognized merchant",
-                  },
-                  {
-                    name: "Gym Membership",
-                    category: "Health & Fitness",
-                    amount: "-P75.00",
-                    date: "Apr 5, 12:00 AM",
-                    icon: "UG",
-                    iconColor: "bg-purple-500",
-                    flag: true,
-                    flagReason: "Unused for 3+ months",
-                  },
-                ].map((transaction, i) => (
-                  <div key={i} className="flex flex-col rounded-lg border p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-10 w-10">
-                          <AvatarFallback className={transaction.iconColor}>{transaction.icon}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{transaction.name}</span>
-                            <Badge variant="destructive" className="h-5 px-1">
-                              <AlertTriangle className="mr-1 h-3 w-3" />
-                              Flagged
-                            </Badge>
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {transaction.category} • {transaction.date}
+                {flaggedTransactions.map((tx, i) => {
+                  const { icon, color } = getTransactionIcon(tx.description)
+                  return (
+                    <div key={i} className="flex flex-col rounded-lg border p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className={color}>{icon}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{tx.description}</span>
+                              <Badge variant="destructive" className="h-5 px-1">
+                                <AlertTriangle className="mr-1 h-3 w-3" />
+                                Flagged
+                              </Badge>
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {tx.date}
+                            </div>
                           </div>
                         </div>
+                        <div className="font-medium">
+                          P{Math.abs(Number(tx.amount)).toFixed(2)}
+                        </div>
                       </div>
-                      <div className="font-medium">{transaction.amount}</div>
+                      <div className="mt-2 rounded-md bg-red-50 p-2 text-sm text-red-700">
+                        <AlertTriangle className="mr-1 inline-block h-3 w-3" />
+                        Flag reason: Unusual amount
+                      </div>
                     </div>
-                    <div className="mt-2 rounded-md bg-red-50 p-2 text-sm text-red-700">
-                      <AlertTriangle className="mr-1 inline-block h-3 w-3" />
-                      Flag reason: {transaction.flagReason}
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </CardContent>
           </Card>

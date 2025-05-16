@@ -3,25 +3,30 @@ export interface Transaction {
   description: string
   amount: string
   balance: string
-  bankCharges?: string
   type: 'credit' | 'debit'
 }
 
 export interface BankStatement {
-  accountHolder: string
-  accountNumber: string
-  statementPeriod: {
+  id: string
+  user_id: string
+  account_holder: string
+  account_number: string
+  statement_period: {
     from: string
     to: string
   }
-  openingBalance: number
-  closingBalance: number
-  vatAmount: number
-  bankCharges: {
-    serviceFees: number
-    cashDepositFees: number
-    cashHandlingFees: number
-    otherFees: number
+  opening_balance: number
+  closing_balance: number
+  vat_amount: number
+  bank_charges: {
+    'Total VAT': number
+    'Other Fees': number
+    'Dr Bank Charges Service Fees': number
   }
   transactions: Transaction[]
+  pdf_url: string | null
+  created_at: string
+  content: string | null
+  filename: string
+  uploaded_at: string
 }
