@@ -97,6 +97,20 @@ const parseDate = (dateString: string): string => {
   }
 }
 
+// Add this helper function with your other helpers
+const getMostRecentClosingBalance = (statements: BankStatement[]): number => {
+  if (!statements.length) return 0;
+  
+  // Sort statements by uploaded_at date if available
+  const sortedStatements = [...statements].sort((a, b) => {
+    const dateA = a.uploaded_at ? new Date(a.uploaded_at) : new Date(0);
+    const dateB = b.uploaded_at ? new Date(b.uploaded_at) : new Date(0);
+    return dateB.getTime() - dateA.getTime();
+  });
+
+  return sortedStatements[0].closing_balance || 0;
+}
+
 export default function Page() {
   const [statements, setStatements] = useState<BankStatement[]>([])
   const [loading, setLoading] = useState(true)
@@ -195,6 +209,9 @@ export default function Page() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
+            <div className="text-2xl font-bold">
+              P{getMostRecentClosingBalance(statements).toFixed(2)}
+            </div>
           </CardContent>
         </Card>
 

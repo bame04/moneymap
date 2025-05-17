@@ -114,7 +114,7 @@ export default function SettingsPage() {
                       <SelectValue placeholder="Select currency" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="usd">USD ($)</SelectItem>
+                      <SelectItem value="bwp">BWP (P)</SelectItem>
                       <SelectItem value="eur">EUR (€)</SelectItem>
                       <SelectItem value="gbp">GBP (£)</SelectItem>
                       <SelectItem value="cad">CAD ($)</SelectItem>
