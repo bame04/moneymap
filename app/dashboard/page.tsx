@@ -352,7 +352,7 @@ export default function Page() {
       {/* Charts */}
       <div className="grid lg:grid-cols-2 gap-6 mt-8">
         <Card>
-          <CardHeader><CardTitle>4-Month Trend</CardTitle></CardHeader>
+          <CardHeader><CardTitle>5-Month Trend</CardTitle></CardHeader>
           <CardContent><SpendingChart stats={monthlyStats} /></CardContent>
         </Card>
         <Card>
